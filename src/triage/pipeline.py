@@ -8,11 +8,10 @@ deployable without the SACC mock API server.
 Workflow (when called sequentially via runner.run_triage):
     1.  Document type determination (keyword matching on extraction data)
     2.  Company classification (Saudia Cargo vs Saudia Airline vs no-match)
-    3.  Direct vs Intercompany determination
-    4.  Invoice type classification (FUEL / CHARTER / SERVICE / OTHER)
-    5.  Detailed field extraction (from pre-supplied extraction entities)
-    6.  Validation (required fields, confidence thresholds, line items)
-    7.  TriageResult construction
+    3.  Invoice type classification (FUEL / CARGO / CHARTER / SERVICE / OTHER)
+    4.  Detailed field extraction (from pre-supplied extraction entities)
+    5.  Validation (required fields, confidence thresholds, line items)
+    6.  TriageResult construction
 """
 
 from __future__ import annotations
@@ -29,9 +28,8 @@ from .config import (
     MIN_CONFIDENCE_THRESHOLD,
     MIN_REQUIRED_FIELD_CONFIDENCE,
 )
-from .models import (
+from .types import (
     CompanyClassification,
-    DirectIntercompany,
     DocumentType,
     InvoiceType,
     TriageResult,
@@ -57,12 +55,29 @@ _CATEGORY_TO_DOC_TYPE = {
     "Credit Note": DocumentType.CREDIT_NOTE,
     "Statement of Account": DocumentType.STATEMENT,
     "Supporting Document": DocumentType.SUPPORTING_DOCUMENT,
+    "Reconciliation": DocumentType.RECONCILIATION,
+    "Purchase Order List": DocumentType.PURCHASE_ORDER_LIST,
+    "General Correspondence": DocumentType.GENERAL_CORRESPONDENCE,
+}
+
+# Mapping from AI Core (GPT-5.4) lowercase document_type values to pipeline enums
+_AI_CORE_TYPE_MAP = {
+    "invoice": DocumentType.INVOICE,
+    "credit_note": DocumentType.CREDIT_NOTE,
+    "supporting_document": DocumentType.SUPPORTING_DOCUMENT,
+    "reconciliation": DocumentType.RECONCILIATION,
+    "statement_of_account": DocumentType.STATEMENT,
+    "purchase_order_list": DocumentType.PURCHASE_ORDER_LIST,
+    "general_correspondence": DocumentType.GENERAL_CORRESPONDENCE,
 }
 
 _VALID_AP_TYPES = {
     DocumentType.INVOICE.value,
     DocumentType.CREDIT_NOTE.value,
     DocumentType.STATEMENT.value,
+    DocumentType.RECONCILIATION.value,
+    DocumentType.PURCHASE_ORDER_LIST.value,
+    DocumentType.GENERAL_CORRESPONDENCE.value,
 }
 
 
@@ -206,23 +221,33 @@ def normalize_payload(raw_data: dict[str, Any], doc_index: int = 0) -> dict[str,
 
 
 def determine_document_type(state: TriageState) -> TriageState:
-    """Determine the document type from classification extraction results.
+    """Determine the document type from AI Core extraction or keyword fallback.
 
-    Uses the shared document type categories from document_types.json to
-    classify the document as INVOICE, CREDIT_NOTE, STATEMENT,
-    SUPPORTING_DOCUMENT, or OTHER.
+    If the AI Core document_type field is present in the extraction, use it
+    directly (mapped to the pipeline's DocumentType enum). Otherwise, fall
+    back to keyword matching against document_types.json.
     """
     logger.info("Step 1: Determining document type...")
     evidence = state.get("evidence", [])
     extraction = state.get("classification_extraction", [])
     extracted_values = build_lookup(extraction)
 
-    all_text = " ".join(v.lower() for v in extracted_values.values())
-    doc_type_field = extracted_values.get("document_type", "").lower()
-
     doc_type = DocumentType.OTHER
 
-    search_text = doc_type_field if doc_type_field else all_text
+    # Primary: use AI Core's document_type if present
+    ai_core_type = extracted_values.get("document_type", "").strip().lower()
+    if ai_core_type and ai_core_type in _AI_CORE_TYPE_MAP:
+        doc_type = _AI_CORE_TYPE_MAP[ai_core_type]
+        evidence.append(
+            f"Document type determined: {doc_type.value} "
+            f"(from SAP AI Core classification: '{ai_core_type}')"
+        )
+        logger.info("Document type: %s (from AI Core)", doc_type.value)
+        return {**state, "document_type": doc_type.value, "evidence": evidence}
+
+    # Fallback: keyword matching on extracted text
+    all_text = " ".join(v.lower() for v in extracted_values.values())
+    search_text = extracted_values.get("document_type", "").lower() or all_text
     for category, doc_types in _DOCUMENT_TYPE_CATEGORIES:
         mapped_type = _CATEGORY_TO_DOC_TYPE.get(category)
         if mapped_type and any(kw in search_text for kw in doc_types):
@@ -231,9 +256,9 @@ def determine_document_type(state: TriageState) -> TriageState:
 
     evidence.append(
         f"Document type determined: {doc_type.value} "
-        f"(based on shared document types from document_types.json)"
+        f"(keyword fallback — no AI Core document_type found)"
     )
-    logger.info("Document type: %s", doc_type.value)
+    logger.info("Document type: %s (keyword fallback)", doc_type.value)
     return {**state, "document_type": doc_type.value, "evidence": evidence}
 
 
@@ -301,8 +326,17 @@ def classify_company(state: TriageState) -> TriageState:
                 match_reasons.append(f"Company name does not match configured '{CONFIGURED_COMPANY_NAME}'")
 
     if not extracted_company_code and not extracted_company_name:
-        company_classification = CompanyClassification.UNCERTAIN
-        match_reasons.append("No company code or name extracted -- classification uncertain")
+        # Default to Saudia Cargo when company code/name not found
+        company_classification = CompanyClassification.MATCH
+        match_reasons.append(
+            "No company code or name extracted — defaulting to Saudia Cargo"
+        )
+        evidence.append(
+            f"Company classification: {company_classification.value}. " + "; ".join(match_reasons)
+        )
+        logger.info("Company classification: %s (default Saudia Cargo)", company_classification.value)
+        return {**state, "company_classification": company_classification.value,
+                "company_name": "Saudia Cargo", "evidence": evidence}
 
     evidence.append(
         f"Company classification: {company_classification.value}. " + "; ".join(match_reasons)
@@ -311,59 +345,17 @@ def classify_company(state: TriageState) -> TriageState:
     return {**state, "company_classification": company_classification.value, "evidence": evidence}
 
 
-# ── Step 3: Determine DIRECT vs INTERCOMPANY ────────────────────────────────
-
-
-def classify_direct_intercompany(state: TriageState) -> TriageState:
-    """Determine whether the invoice is DIRECT or INTERCOMPANY.
-
-    Business rules:
-    - If the extracted company code matches the configured company code -> DIRECT
-    - If the extracted company code is in the intercompany list -> INTERCOMPANY
-    - Otherwise -> UNKNOWN (requires review)
-    """
-    logger.info("Step 3: Determining DIRECT vs INTERCOMPANY...")
-    evidence = state.get("evidence", [])
-    extraction = state.get("classification_extraction", [])
-    extracted_values = build_lookup(extraction)
-
-    extracted_company_code = extracted_values.get("company_code", "")
-    extracted_supplier_name = extracted_values.get("supplier_name", "").lower()
-
-    classification = DirectIntercompany.UNKNOWN
-    reasons: list[str] = []
-
-    if extracted_company_code == CONFIGURED_COMPANY_CODE:
-        classification = DirectIntercompany.DIRECT
-        reasons.append("Company code matches configured company -- DIRECT")
-    elif extracted_company_code in INTERCOMPANY_COMPANY_CODES:
-        classification = DirectIntercompany.INTERCOMPANY
-        reasons.append("Company code is in intercompany list -- INTERCOMPANY")
-    else:
-        configured_name = CONFIGURED_COMPANY_NAME.lower()
-        if extracted_supplier_name and configured_name:
-            if configured_name in extracted_supplier_name or extracted_supplier_name in configured_name:
-                classification = DirectIntercompany.INTERCOMPANY
-                reasons.append("Supplier name matches intercompany pattern -- INTERCOMPANY")
-            else:
-                reasons.append("Cannot determine DIRECT vs INTERCOMPANY from available evidence")
-        else:
-            reasons.append("Insufficient evidence to determine DIRECT vs INTERCOMPANY")
-
-    evidence.append(f"Direct/Intercompany: {classification.value}. " + "; ".join(reasons))
-    logger.info("Direct/Intercompany: %s", classification.value)
-    return {**state, "direct_intercompany": classification.value, "evidence": evidence}
-
-
-# ── Step 4: Determine Invoice Type ─────────────────────────────────────────
+# ── Step 3: Determine Invoice Type ─────────────────────────────────────────
 
 
 def classify_invoice_type(state: TriageState) -> TriageState:
-    """Determine the invoice type: FUEL, CHARTER, SERVICE, or OTHER.
+    """Determine the invoice type: FUEL, CARGO, CHARTER, SERVICE, or OTHER.
 
-    Uses keyword matching on extracted text, document title, and keywords.
+    Uses keyword matching on extracted text from SAP Document AI (DOX)
+    extraction results. This applies to all invoices (both Saudia Cargo
+    and Saudia Airline).
     """
-    logger.info("Step 4: Determining invoice type...")
+    logger.info("Step 3: Determining invoice type...")
     evidence = state.get("evidence", [])
     extraction = state.get("classification_extraction", [])
     extracted_values = build_lookup(extraction)
@@ -381,6 +373,12 @@ def classify_invoice_type(state: TriageState) -> TriageState:
         invoice_type = InvoiceType.FUEL
         reasons.append("Fuel keywords detected in extracted text")
 
+    cargo_keywords = ["air waybill", "awb", "air freight", "general cargo", "air cargo",
+                     "cargo handling", "freight charges", "chargeable weight"]
+    if invoice_type == InvoiceType.OTHER and any(kw in combined for kw in cargo_keywords):
+        invoice_type = InvoiceType.CARGO
+        reasons.append("Cargo keywords detected in extracted text")
+
     charter_keywords = ["charter", "acmi", "wet lease", "dry lease", "aircraft charter",
                         "charter flight", "private flight", "air taxi"]
     if invoice_type == InvoiceType.OTHER and any(kw in combined for kw in charter_keywords):
@@ -397,12 +395,12 @@ def classify_invoice_type(state: TriageState) -> TriageState:
     if invoice_type == InvoiceType.OTHER:
         reasons.append("No specific invoice type keywords detected -- classified as OTHER")
 
-    evidence.append(f"Invoice type: {invoice_type.value}. " + "; ".join(reasons))
-    logger.info("Invoice type: %s", invoice_type.value)
+    evidence.append(f"Invoice type: {invoice_type.value} (keyword match). " + "; ".join(reasons))
+    logger.info("Invoice type: %s (keyword match)", invoice_type.value)
     return {**state, "invoice_type": invoice_type.value, "evidence": evidence}
 
 
-# ── Step 5: Extract Detailed Fields ────────────────────────────────────────
+# ── Step 4: Extract Detailed Fields ────────────────────────────────────────
 
 
 def extract_detailed_fields(state: TriageState) -> TriageState:
@@ -412,7 +410,7 @@ def extract_detailed_fields(state: TriageState) -> TriageState:
     from state (populated by the caller, not by an API call) and splits it
     into header fields (name -> value with confidence) and line items.
     """
-    logger.info("Step 5: Extracting detailed fields...")
+    logger.info("Step 4: Extracting detailed fields...")
     evidence = state.get("evidence", [])
     detailed_extraction = state.get("detailed_extraction", [])
 
@@ -459,12 +457,12 @@ def extract_detailed_fields(state: TriageState) -> TriageState:
             "line_items": line_items, "evidence": evidence}
 
 
-# ── Step 6: Validate Extraction ─────────────────────────────────────────────
+# ── Step 5: Validate Extraction ─────────────────────────────────────────────
 
 
 def validate_extraction(state: TriageState) -> TriageState:
     """Validate extraction confidence and required fields."""
-    logger.info("Step 6: Validating extraction...")
+    logger.info("Step 5: Validating extraction...")
     evidence = state.get("evidence", [])
     invoice_type = state.get("invoice_type", InvoiceType.OTHER.value)
     header_fields = state.get("header_fields", {})
@@ -503,8 +501,6 @@ def validate_extraction(state: TriageState) -> TriageState:
         )
     if not line_items:
         review_reasons.append("No line items extracted")
-    if state.get("direct_intercompany") == DirectIntercompany.UNKNOWN.value:
-        review_reasons.append("DIRECT vs INTERCOMPANY could not be determined")
 
     review_required = len(review_reasons) > 0
     review_reason = "; ".join(review_reasons) if review_reasons else None
@@ -524,16 +520,15 @@ def validate_extraction(state: TriageState) -> TriageState:
             "review_reason": review_reason, "evidence": evidence}
 
 
-# ── Step 7: Build Triage Result ─────────────────────────────────────────────
+# ── Step 6: Build Triage Result ─────────────────────────────────────────────
 
 
 def build_triage_result(state: TriageState) -> TriageState:
     """Build and return the strict JSON TriageResult."""
-    logger.info("Step 7: Building TriageResult...")
+    logger.info("Step 6: Building TriageResult...")
     result = TriageResult(
         document_type=state.get("document_type", DocumentType.OTHER.value),
         company_classification=state.get("company_classification", CompanyClassification.UNCERTAIN.value),
-        direct_intercompany=state.get("direct_intercompany", DirectIntercompany.UNKNOWN.value),
         invoice_type=state.get("invoice_type", InvoiceType.OTHER.value),
         extracted_header_fields=state.get("header_fields", {}),
         line_items=state.get("line_items", []),
@@ -556,7 +551,7 @@ def review_node(state: TriageState) -> TriageState:
     evidence = state.get("evidence", [])
     doc_type = state.get("document_type", DocumentType.OTHER.value)
 
-    reason = f"Document type '{doc_type}' is not a valid AP document (INVOICE/CREDIT_NOTE/STATEMENT)"
+    reason = f"Document type '{doc_type}' is not a valid AP document (INVOICE/CREDIT_NOTE/STATEMENT/RECONCILIATION/PURCHASE_ORDER_LIST/GENERAL_CORRESPONDENCE)"
     if state.get("company_classification") == CompanyClassification.NO_MATCH.value:
         reason = f"Company does not match configured company '{CONFIGURED_COMPANY_NAME}' ({CONFIGURED_COMPANY_CODE})"
 
@@ -564,7 +559,6 @@ def review_node(state: TriageState) -> TriageState:
     result = TriageResult(
         document_type=doc_type,
         company_classification=state.get("company_classification", CompanyClassification.UNCERTAIN.value),
-        direct_intercompany=state.get("direct_intercompany", DirectIntercompany.UNKNOWN.value),
         invoice_type=state.get("invoice_type", InvoiceType.OTHER.value),
         extracted_header_fields=state.get("header_fields", {}),
         line_items=state.get("line_items", []),

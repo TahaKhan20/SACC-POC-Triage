@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from .models import InvoiceType
+from .types import InvoiceType
 
 
 # ── Line item sub-field definitions ────────────────────────────────────────
@@ -35,6 +35,8 @@ COMMON_HEADER_FIELDS = [
     {"name": "currency", "label": "Currency", "type": "string", "dataType": "string", "mandatory": True, "minimumOccurrence": 1, "maximumOccurrence": 1},
     {"name": "tax_amount", "label": "Tax Amount", "type": "number", "dataType": "number", "mandatory": False, "minimumOccurrence": 0, "maximumOccurrence": 1},
     {"name": "net_amount", "label": "Net Amount", "type": "number", "dataType": "number", "mandatory": False, "minimumOccurrence": 0, "maximumOccurrence": 1},
+    {"name": "vendor_number", "label": "Vendor Number", "type": "string", "dataType": "string", "mandatory": False, "minimumOccurrence": 0, "maximumOccurrence": 1},
+    {"name": "po_number", "label": "PO Number", "type": "string", "dataType": "string", "mandatory": False, "minimumOccurrence": 0, "maximumOccurrence": 1},
 ]
 
 
@@ -58,6 +60,15 @@ DETAILED_SCHEMAS: dict[str, list[dict[str, Any]]] = {
         {"name": "unit_price", "label": "Unit Price", "type": "number", "dataType": "number", "mandatory": True, "minimumOccurrence": 1, "maximumOccurrence": 1},
         {"name": "airport_code", "label": "Airport Code", "type": "string", "dataType": "string", "mandatory": False, "minimumOccurrence": 0, "maximumOccurrence": 1},
         {"name": "flight_number", "label": "Flight Number", "type": "string", "dataType": "string", "mandatory": False, "minimumOccurrence": 0, "maximumOccurrence": 1},
+        _line_items_entity(),
+    ],
+    InvoiceType.CARGO.value: COMMON_HEADER_FIELDS + [
+        {"name": "cargo_type", "label": "Cargo Type", "type": "string", "dataType": "string", "mandatory": False, "minimumOccurrence": 0, "maximumOccurrence": 1},
+        {"name": "awb_number", "label": "AWB Number", "type": "string", "dataType": "string", "mandatory": False, "minimumOccurrence": 0, "maximumOccurrence": 1},
+        {"name": "flight_number", "label": "Flight Number", "type": "string", "dataType": "string", "mandatory": False, "minimumOccurrence": 0, "maximumOccurrence": 1},
+        {"name": "origin", "label": "Origin", "type": "string", "dataType": "string", "mandatory": False, "minimumOccurrence": 0, "maximumOccurrence": 1},
+        {"name": "destination", "label": "Destination", "type": "string", "dataType": "string", "mandatory": False, "minimumOccurrence": 0, "maximumOccurrence": 1},
+        {"name": "chargeable_weight", "label": "Chargeable Weight", "type": "number", "dataType": "number", "mandatory": False, "minimumOccurrence": 0, "maximumOccurrence": 1},
         _line_items_entity(),
     ],
     InvoiceType.CHARTER.value: COMMON_HEADER_FIELDS + [

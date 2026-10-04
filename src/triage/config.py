@@ -47,11 +47,18 @@ MIN_REQUIRED_FIELD_CONFIDENCE = float(
     os.getenv("MIN_REQUIRED_FIELD_CONFIDENCE", "0.80")
 )
 
-# ── SAP Document AI credentials ───────────────────────────────────────────
+# ── SAP AI Core credentials (for classification) ────────────────────────
 
-# Path to the SAP service-key JSON file (default: config/sap_credentials.json)
+# Path to the SAP AI Core service-key JSON file (default: config/ai_core_cred.json)
 SAP_CREDENTIALS_FILE = os.getenv(
-    "SAP_CREDENTIALS_FILE", str(CONFIG_DIR / "sap_credentials.json")
+    "SAP_CREDENTIALS_FILE", str(CONFIG_DIR / "ai_core_cred.json")
+)
+
+# ── SAP Document AI credentials (for extraction) ────────────────────────
+
+# Path to the SAP Document AI service-key JSON file (default: config/sap_credentials.json)
+SAP_DOC_AI_CREDENTIALS_FILE = os.getenv(
+    "SAP_DOC_AI_CREDENTIALS_FILE", str(CONFIG_DIR / "sap_credentials.json")
 )
 
 # ── Optional: LLM configuration ─────────────────────────────────────────────

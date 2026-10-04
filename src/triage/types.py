@@ -1,8 +1,8 @@
-"""Data models and enums for the AP Invoice Triage Agent.
+"""Domain types and enums for the AP Invoice Triage Agent.
 
-This module contains all domain enums and dataclasses used throughout the
-triage pipeline. It has zero external dependencies and can be imported
-anywhere without side effects.
+Contains all domain enums (DocumentType, CompanyClassification, etc.) and
+dataclasses (TriageResult, ExtractedField, LineItem) used throughout the
+triage pipeline. Zero external dependencies.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from enum import Enum
 from typing import Any, Optional
 
 
-# ── Enums ------------------------------------------------------------------
+# -- Enums ------------------------------------------------------------------
 
 
 class DocumentType(str, Enum):
@@ -22,6 +22,9 @@ class DocumentType(str, Enum):
     CREDIT_NOTE = "CREDIT_NOTE"
     STATEMENT = "STATEMENT"
     SUPPORTING_DOCUMENT = "SUPPORTING_DOCUMENT"
+    RECONCILIATION = "RECONCILIATION"
+    PURCHASE_ORDER_LIST = "PURCHASE_ORDER_LIST"
+    GENERAL_CORRESPONDENCE = "GENERAL_CORRESPONDENCE"
     OTHER = "OTHER"
 
 
@@ -32,22 +35,16 @@ class CompanyClassification(str, Enum):
     UNCERTAIN = "UNCERTAIN"
 
 
-class DirectIntercompany(str, Enum):
-    """Direct vs intercompany classification."""
-    DIRECT = "DIRECT"
-    INTERCOMPANY = "INTERCOMPANY"
-    UNKNOWN = "UNKNOWN"
-
-
 class InvoiceType(str, Enum):
     """Invoice type classification."""
     FUEL = "FUEL"
+    CARGO = "CARGO"
     CHARTER = "CHARTER"
     SERVICE = "SERVICE"
     OTHER = "OTHER"
 
 
-# ── Dataclasses ------------------------------------------------------------
+# -- Dataclasses ------------------------------------------------------------
 
 
 @dataclass
@@ -79,7 +76,6 @@ class TriageResult:
     """Strict JSON TriageResult returned at the end of the workflow."""
     document_type: str
     company_classification: str
-    direct_intercompany: str
     invoice_type: str
     extracted_header_fields: dict[str, Any]
     line_items: list[dict[str, Any]]
@@ -92,7 +88,6 @@ class TriageResult:
         return {
             "document_type": self.document_type,
             "company_classification": self.company_classification,
-            "direct_intercompany": self.direct_intercompany,
             "invoice_type": self.invoice_type,
             "extracted_header_fields": self.extracted_header_fields,
             "line_items": self.line_items,

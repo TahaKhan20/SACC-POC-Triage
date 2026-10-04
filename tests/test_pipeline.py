@@ -17,13 +17,11 @@ import pytest
 
 from triage import (
     CompanyClassification,
-    DirectIntercompany,
     DocumentType,
     InvoiceType,
     TriageState,
     build_lookup,
     classify_company,
-    classify_direct_intercompany,
     classify_invoice_type,
     determine_document_type,
     extract_value,
@@ -167,37 +165,12 @@ class TestClassifyCompany:
         assert result["company_name"] == "Saudia Airline"
 
     def test_uncertain_no_company_data(self):
+        """When no company code/name/PO/vendor found, defaults to Saudia Cargo (MATCH)."""
         entities = [{"name": "invoice_number", "stringValue": "INV-001", "confidence": 0.9}]
         state = TriageState(classification_extraction=entities, evidence=[])
         result = classify_company(state)
-        assert result["company_classification"] == CompanyClassification.UNCERTAIN.value
-
-
-# ── Direct vs Intercompany Tests ─────────────────────────────────────────────
-
-
-class TestClassifyDirectIntercompany:
-    def test_direct(self, invoice_entities):
-        state = TriageState(classification_extraction=invoice_entities, evidence=[])
-        result = classify_direct_intercompany(state)
-        assert result["direct_intercompany"] == DirectIntercompany.DIRECT.value
-
-    def test_intercompany(self):
-        entities = [
-            {"name": "company_code", "stringValue": "2000", "confidence": 0.9},
-        ]
-        state = TriageState(classification_extraction=entities, evidence=[])
-        result = classify_direct_intercompany(state)
-        assert result["direct_intercompany"] == DirectIntercompany.INTERCOMPANY.value
-
-    def test_unknown(self):
-        entities = [
-            {"name": "company_code", "stringValue": "9999", "confidence": 0.9},
-            {"name": "supplier_name", "stringValue": "Unknown Supplier", "confidence": 0.9},
-        ]
-        state = TriageState(classification_extraction=entities, evidence=[])
-        result = classify_direct_intercompany(state)
-        assert result["direct_intercompany"] == DirectIntercompany.UNKNOWN.value
+        assert result["company_classification"] == CompanyClassification.MATCH.value
+        assert result["company_name"] == "Saudia Cargo"
 
 
 # ── Invoice Type Tests ──────────────────────────────────────────────────────
@@ -208,6 +181,16 @@ class TestClassifyInvoiceType:
         state = TriageState(classification_extraction=fuel_invoice_entities, evidence=[])
         result = classify_invoice_type(state)
         assert result["invoice_type"] == InvoiceType.FUEL.value
+
+    def test_cargo(self):
+        entities = [
+            {"name": "document_type", "stringValue": "invoice", "confidence": 0.95},
+            {"name": "cargo_type", "stringValue": "general cargo", "confidence": 0.90},
+            {"name": "awb_number", "stringValue": "AWB-12345", "confidence": 0.85},
+        ]
+        state = TriageState(classification_extraction=entities, evidence=[])
+        result = classify_invoice_type(state)
+        assert result["invoice_type"] == InvoiceType.CARGO.value
 
     def test_charter(self, charter_invoice_entities):
         state = TriageState(classification_extraction=charter_invoice_entities, evidence=[])
@@ -239,13 +222,13 @@ class TestRunTriage:
         )
         assert result["document_type"] == DocumentType.INVOICE.value
         assert result["company_classification"] == CompanyClassification.MATCH.value
-        assert result["direct_intercompany"] == DirectIntercompany.DIRECT.value
         assert "evidence" in result
         assert len(result["evidence"]) > 0
 
     def test_non_ap_document_routes_to_review(self):
+        """A truly unrecognized document type routes to review as OTHER."""
         entities = [
-            {"name": "document_type", "stringValue": "correspondence", "confidence": 0.9},
+            {"name": "document_type", "stringValue": "xyz_random_doc", "confidence": 0.9},
         ]
         result = run_triage(classification_extraction=entities)
         assert result["document_type"] == DocumentType.OTHER.value
@@ -275,7 +258,7 @@ class TestRunTriage:
     def test_result_has_all_fields(self, invoice_entities):
         result = run_triage(classification_extraction=invoice_entities)
         required_keys = {
-            "document_type", "company_classification", "direct_intercompany",
+            "document_type", "company_classification",
             "invoice_type", "extracted_header_fields", "line_items",
             "confidence", "evidence", "review_required", "review_reason",
         }

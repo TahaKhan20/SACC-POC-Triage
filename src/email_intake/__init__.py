@@ -1,22 +1,18 @@
-"""Email Intake Agent — standalone email fetch, enrich, and classify.
+"""Email Intake Agent -- standalone email fetch and enrich.
+
+The Email Intake Agent fetches the latest email from Microsoft Graph and
+enriches it with full body + attachments. Classification is handled by the
+Triage Agent using SAP AI Core, not here.
 
 Public API::
 
-    from email_intake import run_intake, run_intake_standalone, classify_emails
+    from email_intake import run_intake, run_intake_standalone
     from email_intake import EmailMessage, save_attachment_to_temp
-    from email_intake import score_with_details, score_email_relevance, categorize_email
+    from email_intake import fetch_emails, enrich_emails
 """
 
-from .classify import (
-    categorize_email,
-    classify_emails,
-    has_document_attachment,
-    score_email_relevance,
-    score_with_details,
-)
 from .config import DOCUMENT_EXTENSIONS
-from .fetch import enrich_emails, fetch_emails
-from .models import EmailMessage
+from .fetch import EmailMessage, enrich_emails, fetch_emails
 from .runner import run_intake, run_intake_standalone, save_attachment_to_temp
 
 __all__ = [
@@ -24,12 +20,6 @@ __all__ = [
     "EmailMessage",
     # Config
     "DOCUMENT_EXTENSIONS",
-    # Classification (standalone)
-    "categorize_email",
-    "classify_emails",
-    "has_document_attachment",
-    "score_email_relevance",
-    "score_with_details",
     # Fetch (requires httpx + Graph API)
     "enrich_emails",
     "fetch_emails",
@@ -39,4 +29,4 @@ __all__ = [
     "save_attachment_to_temp",
 ]
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"

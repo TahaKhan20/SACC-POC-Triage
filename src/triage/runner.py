@@ -2,8 +2,8 @@
 
 This module orchestrates the standalone pipeline steps. It accepts
 classification_extraction and detailed_extraction data directly (e.g. from a
-JSON payload or an upstream extraction service like SAP Document AI),
-so it can run entirely offline without any external API server.
+JSON payload or from SAP AI Core classification + SAP Document AI
+extraction), so it can run entirely offline without any external API server.
 
 Usage (programmatic)::
 
@@ -18,7 +18,7 @@ Usage (programmatic)::
 
 Usage (CLI)::
 
-    python run.py data/doc_ai_payload.json          # first document
+    python run.py data/doc_ai_payload.json          # SAP Document AI payload
     python run.py data/doc_ai_payload.json 2         # third document (0-indexed)
     python run.py data/doc_ai_payload.json all       # all documents
 """
@@ -31,12 +31,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .models import CompanyClassification, DocumentType
+from .types import CompanyClassification, DocumentType
 from .pipeline import (
     _VALID_AP_TYPES,
     build_triage_result,
     classify_company,
-    classify_direct_intercompany,
     classify_invoice_type,
     determine_document_type,
     extract_detailed_fields,
@@ -97,8 +96,7 @@ def run_triage(
         state = build_triage_result(state)
         return state.get("triage_result", {})
 
-    # -- Steps 4-7: Full extraction pipeline -----------------------------
-    state = classify_direct_intercompany(state)
+    # -- Steps 3-6: Full extraction pipeline -----------------------------
     state = classify_invoice_type(state)
     state = extract_detailed_fields(state)
     state = validate_extraction(state)
@@ -109,7 +107,7 @@ def run_triage(
 def run_triage_from_payload(raw_data: dict[str, Any], doc_index: int = 0) -> dict[str, Any]:
     """Normalise a raw JSON payload then run the triage pipeline.
 
-    Accepts doc_ai_payload.json format, sample_data.json format, or a
+    Accepts SAP Document AI payload format, sample_data.json format, or a
 generic dict with headerFields/lineItems.
     """
     normalized = normalize_payload(raw_data, doc_index)

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """SACC-POC-Triage Workflow CLI entry point.
 
-Run the full email-to-triage workflow: fetch emails from Microsoft Graph →
-classify relevance → triage document attachments.
+Run the full email-to-triage workflow: fetch emails from Microsoft Graph,
+enrich them with body + attachments, and triage every document
+attachment via the Triage Agent.
 
 Usage:
-    python run_workflow.py                        # fetch + triage all emails
+    python run_workflow.py                        # fetch + triage emails
     python run_workflow.py --top 10               # limit to 10 emails
-    python run_workflow.py --dry-run               # fetch + classify only
-    python run_workflow.py --min-score 30          # custom min score
+    python run_workflow.py --dry-run              # fetch only, skip triage
 """
 
 import sys

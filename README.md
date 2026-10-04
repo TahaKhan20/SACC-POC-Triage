@@ -60,11 +60,11 @@ SACC-POC-Triage/
 ├── tests/
 │   ├── __init__.py
 │   ├── test_pipeline.py       # Unit tests for triage pipeline
-│   ├── test_doc_ai.py        # Unit tests for SAP Doc AI conversion
-│   └── test_email_intake.py   # Unit tests for email classification
-├── run.py                     # Triage CLI entry point (standalone)
-├── run_doc_ai.py              # SAP Document AI triage CLI entry point
-├── run_workflow.py            # Workflow CLI entry point
+│   ├── test_ai_core.py        # Unit tests for SAP AI Core client
+│   └── test_email_intake.py   # Unit tests for email intake
+├── run_triage.py              # Triage Agent CLI (payload / --ai-core / --doc-ai)
+├── run_email_intake.py        # Email Intake Agent CLI (fetch + enrich)
+├── run_workflow.py            # Workflow CLI (email → triage)
 ├── requirements.txt           # Dependencies (core has zero)
 ├── README.md
 └── .gitignore
@@ -80,18 +80,23 @@ pip install -r requirements.txt
 cp config/.env.example .env  # Edit as needed
 
 # 3. Run triage with sample data
-python run.py                           # First document from default payload
-python run.py data/doc_ai_payload.json  # Specify file
-python run.py data/doc_ai_payload.json all  # All documents
+python run_triage.py                               # First document from default payload
+python run_triage.py data/doc_ai_payload.json      # Specify file
+python run_triage.py data/doc_ai_payload.json all  # All documents
 
-# 4. Run the full workflow (requires Graph API credentials)
+# 4. Fetch the latest email only (requires Graph API credentials)
+python run_email_intake.py                # latest email only
+python run_email_intake.py --top 10       # up to 10 most recent emails
+
+# 5. Run the full workflow (requires Graph API credentials)
 python run_workflow.py                  # fetch + triage all emails
 python run_workflow.py --top 10         # limit to 10 emails
-python run_workflow.py --dry-run        # fetch + classify only, skip triage
+python run_workflow.py --dry-run        # fetch only, skip triage
 
-# 5. Triage a real document via SAP Document AI (requires SAP credentials)
-python run_doc_ai.py path/to/invoice.pdf
-python run_doc_ai.py path/to/invoice.pdf --cred-file cred.json
+# 6. Triage real documents via SAP (requires SAP credentials)
+python run_triage.py --ai-core path/to/invoice.pdf        # SAP AI Core (GPT-5.4)
+python run_triage.py --doc-ai                             # SAP Document AI batch (invoice_samples/)
+python run_triage.py --doc-ai path/to/invoice.pdf --cred-file cred.json
 ```
 
 ## SAP Document AI Integration

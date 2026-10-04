@@ -3,34 +3,60 @@
 These functions make HTTP calls to the Microsoft Graph API (or a compatible
 proxy). They require the ``httpx`` package and valid Graph API credentials.
 
-When credentials are unavailable, they return empty results gracefully so
-the rest of the pipeline (classification, scoring) can still be tested with
-manually-constructed EmailMessage objects.
+The Email Intake Agent fetches ONLY the latest email (highest receivedDateTime)
+and enriches it with full body + attachments. Classification is handled by
+the Triage Agent using SAP AI Core — not here.
 """
 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
 from typing import Any
 
 from .config import GRAPH_API_BASE_URL
-from .models import EmailMessage
 
 logger = logging.getLogger("email_intake_agent")
+
+
+# -- Data Model -------------------------------------------------------------
+
+
+@dataclass
+class EmailMessage:
+    """Normalised email representation returned by the Email Intake Agent."""
+    message_id: str
+    subject: str
+    sender: str
+    sender_name: str = ""
+    recipients: list[str] = field(default_factory=list)
+    received_date: str = ""
+    body_preview: str = ""
+    body_content: str = ""
+    has_attachments: bool = False
+    attachments: list[dict[str, Any]] = field(default_factory=list)
+    importance: str = "normal"
+    is_read: bool = False
 
 
 # ── Node 1: Fetch Emails ───────────────────────────────────────────────────
 
 
-def fetch_emails(user_id: str, api_token: str, top: int = 50) -> list[EmailMessage]:
-    """List messages from the mailbox via GET /v1.0/users/{user_id}/messages."""
-    logger.info("Node 1: Fetching emails from Graph API for user %s …", user_id)
+def fetch_emails(user_id: str, api_token: str, top: int = 1) -> list[EmailMessage]:
+    """Fetch the latest email(s) from the mailbox.
+
+    Uses $orderby=receivedDateTime desc so the most recent email is first.
+    By default fetches only 1 email (the latest). Increase ``top`` to fetch
+    more if needed.
+    """
+    logger.info("Node 1: Fetching latest email(s) from Graph API for user %s …", user_id)
 
     url = f"{GRAPH_API_BASE_URL}/v1.0/users/{user_id}/messages"
     headers = {"Accept": "application/json"}
     params = {
         "api_token": api_token,
         "$top": top,
+        "$orderby": "receivedDateTime desc",
         "$select": "id,subject,from,toRecipients,receivedDateTime,bodyPreview,"
                     "hasAttachments,importance,isRead",
     }

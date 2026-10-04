@@ -3,10 +3,10 @@
 Thin orchestrator that connects the Email Intake Agent to the Triage Agent:
 
     1.  EMAIL INTAKE  – delegates to email_intake.run_intake() which
-        fetches emails from Microsoft Graph, enriches them with full body
-        content and attachments, and classifies which emails are relevant.
-    2.  TRIAGE         – for each relevant email with document attachments,
-        runs the triage pipeline (run_triage) on the extraction data.
+        fetches emails from Microsoft Graph and enriches them with full
+        body content and attachments.
+    2.  TRIAGE         – for each email with document attachments, runs
+        the triage pipeline (run_triage) on the extraction data.
 
 The triage step uses the standalone triage package (no SACC mock API needed).
 When the Graph API is not available, the workflow can accept pre-supplied
@@ -24,7 +24,6 @@ from typing import Any
 from email_intake import (
     DOCUMENT_EXTENSIONS,
     EmailMessage,
-    classify_emails,
     run_intake,
     save_attachment_to_temp,
 )
@@ -37,23 +36,23 @@ logger = logging.getLogger("workflow")
 
 
 def triage_documents(
-    relevant_emails: list[EmailMessage],
+    emails: list[EmailMessage],
     dry_run: bool = False,
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """For each relevant email with document attachments, call the Triage Agent.
+    """For each email with document attachments, call the Triage Agent.
 
     Returns (triage_results, errors).
     """
     if dry_run:
-        logger.info("TRIAGE: DRY RUN — skipping triage (would triage %d emails)", len(relevant_emails))
+        logger.info("TRIAGE: DRY RUN — skipping triage (would triage %d emails)", len(emails))
         return [], []
 
     triage_results: list[dict[str, Any]] = []
     errors: list[str] = []
 
-    logger.info("TRIAGE: Processing %d relevant emails …", len(relevant_emails))
+    logger.info("TRIAGE: Processing %d emails …", len(emails))
 
-    for email in relevant_emails:
+    for email in emails:
         logger.info("─" * 60)
         logger.info("Email: '%s' from %s", email.subject[:80], email.sender)
 
@@ -84,7 +83,6 @@ def triage_documents(
                 # We build a payload from the email context and attachment info.
                 payload = {
                     "headerFields": {
-                        "document_type": email.category,
                         "attachment": att_name,
                     },
                     "lineItems": [],
@@ -95,9 +93,6 @@ def triage_documents(
                     payload["headerFields"]["email_body"] = email.body_content[:500]
 
                 result = run_triage_from_payload(payload)
-
-                # Override document_type with email category
-                result["document_type"] = email.category
 
                 # Enrich result with email context
                 result["email_context"] = {
@@ -111,11 +106,9 @@ def triage_documents(
                 }
 
                 triage_results.append(result)
-                logger.info("  Category: %s", email.category)
-                logger.info("  Triage result: type=%s company=%s direct_intercompany=%s review=%s",
+                logger.info("  Triage result: type=%s company=%s review=%s",
                             result.get("document_type"),
                             result.get("company_classification"),
-                            result.get("direct_intercompany"),
                             result.get("review_required"))
 
             except Exception as exc:
@@ -136,20 +129,18 @@ def triage_documents(
 def run_workflow(
     top: int = 50,
     dry_run: bool = False,
-    min_score: int = 20,
 ) -> dict[str, Any]:
     """Run the full email-to-triage workflow.
 
-    Delegates email fetching, enrichment, and classification to the Email
-    Intake Agent, then runs the Triage Agent on relevant document attachments.
+    Delegates email fetching and enrichment to the Email Intake Agent,
+    then runs the Triage Agent on every email with document attachments.
 
     Credentials (GRAPH_USER_ID, GRAPH_API_TOKEN) are read from environment
     variables by the Email Intake Agent.
 
     Args:
         top: Maximum number of emails to fetch from the mailbox.
-        dry_run: If True, fetch and classify emails but skip triage.
-        min_score: Minimum relevance score for email classification.
+        dry_run: If True, fetch emails but skip triage.
 
     Returns:
         Summary dict with email counts, triage results, and errors.
@@ -158,30 +149,28 @@ def run_workflow(
     logger.info("STARTING EMAIL-TO-TRIAGE WORKFLOW")
     logger.info("=" * 60)
 
-    # Step 1: Email Intake Agent — fetch, enrich, classify
-    intake_result = run_intake(top=top, min_score=min_score)
+    # Step 1: Email Intake Agent — fetch + enrich
+    intake_result = run_intake(top=top)
 
     if intake_result.get("error"):
         return {"error": intake_result["error"], "triage_results": [], "errors": [intake_result["error"]]}
 
-    relevant_emails = intake_result["relevant_emails"]
-    if not relevant_emails:
-        logger.warning("No relevant emails found — nothing to triage")
+    emails = intake_result["emails"]
+    if not emails:
+        logger.warning("No emails fetched — nothing to triage")
         return {
             "total_emails_fetched": intake_result["total_emails"],
-            "relevant_emails": 0,
             "triage_results_count": 0,
             "triage_results": [],
             "errors": intake_result.get("errors", []),
             "dry_run": dry_run,
         }
 
-    # Step 2: Triage Agent — classify documents from relevant emails
-    triage_results, triage_errors = triage_documents(relevant_emails, dry_run=dry_run)
+    # Step 2: Triage Agent — triage documents from all fetched emails
+    triage_results, triage_errors = triage_documents(emails, dry_run=dry_run)
 
     return {
         "total_emails_fetched": intake_result["total_emails"],
-        "relevant_emails": len(relevant_emails),
         "triage_results_count": len(triage_results),
         "triage_results": triage_results,
         "errors": intake_result.get("errors", []) + triage_errors,
@@ -192,7 +181,6 @@ def run_workflow(
 def run_workflow_standalone(
     emails: list[EmailMessage],
     dry_run: bool = False,
-    min_score: int = 50,
 ) -> dict[str, Any]:
     """Run the workflow on pre-supplied EmailMessage objects (no Graph API).
 
@@ -202,23 +190,19 @@ def run_workflow_standalone(
     logger.info("STARTING EMAIL-TO-TRIAGE WORKFLOW (STANDALONE MODE)")
     logger.info("=" * 60)
 
-    relevant_emails = classify_emails(emails, min_score=min_score)
-
-    if not relevant_emails:
+    if not emails:
         return {
-            "total_emails_fetched": len(emails),
-            "relevant_emails": 0,
+            "total_emails_fetched": 0,
             "triage_results_count": 0,
             "triage_results": [],
             "errors": [],
             "dry_run": dry_run,
         }
 
-    triage_results, triage_errors = triage_documents(relevant_emails, dry_run=dry_run)
+    triage_results, triage_errors = triage_documents(emails, dry_run=dry_run)
 
     return {
         "total_emails_fetched": len(emails),
-        "relevant_emails": len(relevant_emails),
         "triage_results_count": len(triage_results),
         "triage_results": triage_results,
         "errors": triage_errors,
@@ -237,14 +221,12 @@ def main() -> None:
         description="Email-to-Triage Workflow: connect Email Intake Agent to Triage Agent.",
     )
     parser.add_argument("--top", type=int, default=50, help="Max emails to fetch (default: 50)")
-    parser.add_argument("--min-score", type=int, default=20, help="Min relevance score (default: 20)")
-    parser.add_argument("--dry-run", action="store_true", help="Fetch and classify only, skip triage")
+    parser.add_argument("--dry-run", action="store_true", help="Fetch emails only, skip triage")
     args = parser.parse_args()
 
     summary = run_workflow(
         top=args.top,
         dry_run=args.dry_run,
-        min_score=args.min_score,
     )
 
     print("\n" + "=" * 60)

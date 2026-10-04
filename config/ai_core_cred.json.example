@@ -1,0 +1,15 @@
+{
+  "clientid": "sb-your-client-id!b12345|xsuaa_std!b67890",
+  "clientsecret": "your-client-secret-here",
+  "url": "https://your-subaccount.authentication.in30.hana.ondemand.com",
+  "identityzone": "your-subaccount",
+  "identityzoneid": "your-identity-zone-id",
+  "appname": "your-app-name!b12345|xsuaa_std!b67890",
+  "credential-type": "binding-secret",
+  "serviceurls": {
+    "AI_API_URL": "https://api.ai.prod-in30.asia-south1.gcp.ml.hana.ondemand.com"
+  },
+  "token-type": [
+    "xsuaa"
+  ]
+}
