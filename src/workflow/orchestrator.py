@@ -168,7 +168,7 @@ def triage_documents(
 
 
 def run_workflow(
-    top: int = 50,
+    top: int = 1,
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Run the full email-to-triage workflow.
@@ -261,7 +261,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Email-to-Triage Workflow: connect Email Intake Agent to Triage Agent.",
     )
-    parser.add_argument("--top", type=int, default=50, help="Max emails to fetch (default: 50)")
+    parser.add_argument("--top", type=int, default=1, help="Max emails to fetch (default: 1 = latest only)")
     parser.add_argument("--dry-run", action="store_true", help="Fetch emails only, skip triage")
     args = parser.parse_args()
 
