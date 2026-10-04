@@ -7,3 +7,6 @@ __pycache__/
 dist/
 build/
 .env
+output/
+invoice_samples/*
+!invoice_samples/.gitkeep
