@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 """SACC-POC-Triage — Triage Agent CLI entry point (all triage modes).
 
-  PAYLOAD MODE (default) — run the standalone triage pipeline on a JSON
-  payload (SAP Document AI format, sample_data format, or generic
-  headerFields/lineItems):
+  PAYLOAD MODE — run the standalone triage pipeline on a JSON payload
+  (SAP Document AI format, sample_data format, or generic
+  headerFields/lineItems).  Pass a .json file explicitly:
 
-    python run_triage.py                               # data/doc_ai_payload.json
     python run_triage.py data/doc_ai_payload.json      # first document
     python run_triage.py data/doc_ai_payload.json 2    # third document (0-indexed)
     python run_triage.py data/doc_ai_payload.json all # all documents
 
-  AI CORE MODE — process a document via SAP AI Core (GPT-5.4), then run
-  the full triage pipeline on the extraction:
+  FILE INPUT MODE (default for non-JSON files) — auto-detect a document
+  file (PDF, PNG, JPG, etc.) and process it via SAP AI Core (GPT-5.4),
+  then run the full triage pipeline on the extraction:
+
+    python run_triage.py path/to/invoice.pdf           # auto → AI Core mode
+    python run_triage.py path/to/invoice.pdf --cred-file ai_core_cred.json
+
+  AI CORE MODE — explicitly process a document via SAP AI Core:
 
     python run_triage.py --ai-core path/to/invoice.pdf
     python run_triage.py --ai-core path/to/invoice.pdf --cred-file ai_core_cred.json
@@ -25,11 +30,23 @@
     python run_triage.py --doc-ai --cred-file sap_credentials.json
 """
 
+import os
 import sys
 from pathlib import Path
 
 # Ensure src/ is on the path when running from the project root
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+
+# File extensions that trigger file-input mode (auto-route to AI Core)
+_DOCUMENT_EXTENSIONS = {
+    ".pdf", ".png", ".jpg", ".jpeg", ".tif", ".tiff",
+    ".doc", ".docx", ".xls", ".xlsx",
+}
+
+
+def _is_document_file(path: str) -> bool:
+    """Return True if *path* looks like a document file (not JSON)."""
+    return Path(path).suffix.lower() in _DOCUMENT_EXTENSIONS
 
 
 def run_doc_ai_batch(file_args: list[str]) -> None:
@@ -204,8 +221,14 @@ def main() -> None:
         # Document AI batch mode
         run_doc_ai_batch(argv[1:])
 
+    elif argv and _is_document_file(argv[0]):
+        # File input mode — auto-detect document file and route to AI Core
+        sys.argv = ["run_triage.py"] + argv
+        from triage.ai_core import main as ai_core_main
+        ai_core_main()
+
     else:
-        # Payload mode — delegate to triage.runner's CLI
+        # Payload mode — delegate to triage.runner's CLI (expects JSON)
         from triage.runner import main as runner_main
         runner_main()
 

@@ -35,15 +35,61 @@ _load_env_file()
 GRAPH_API_BASE_URL = os.getenv("GRAPH_API_BASE_URL", "https://graph.microsoft.com")
 
 
+def _acquire_token_client_credentials(
+    tenant_id: str, client_id: str, client_secret: str
+) -> str:
+    """Acquire a Graph access token via the OAuth2 client credentials flow.
+
+    Uses the app registration's tenant_id + client_id + client_secret to
+    request an app-only token from login.microsoftonline.com. Requires the
+    'Mail.Read' application permission (with admin consent) on the app
+    registration in Azure.
+
+    Raises on any failure so the caller sees the exact OAuth error.
+    """
+    import httpx
+
+    url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
+    data = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "scope": "https://graph.microsoft.com/.default",
+    }
+    resp = httpx.post(url, data=data, timeout=30)
+    if resp.status_code != 200:
+        detail = resp.text[:300]
+        raise RuntimeError(
+            f"OAuth2 token request failed (HTTP {resp.status_code}): {detail}"
+        )
+    return resp.json()["access_token"]
+
+
 def get_credentials() -> tuple[str, str]:
     """Read credentials from env vars at call time (not import time).
 
     A .env file at the project root or in config/ is loaded first (if
     python-dotenv is installed), so credentials can be supplied via .env
     instead of exported shell variables.
+
+    Token resolution order:
+      1. GRAPH_API_TOKEN if set (a pre-acquired access token)
+      2. OAuth2 client credentials flow using GRAPH_TENANT_ID /
+         GRAPH_CLIENT_ID / GRAPH_CLIENT_SECRET (app registration)
+
+    GRAPH_USER_ID is the mailbox to read (e.g. sacc.ap.invoice@addo.ai).
     """
     _load_env_file()
-    return os.getenv("GRAPH_USER_ID", ""), os.getenv("GRAPH_API_TOKEN", "")
+    user_id = os.getenv("GRAPH_USER_ID", "")
+    tenant_id = os.getenv("GRAPH_TENANT_ID", "")
+    client_id = os.getenv("GRAPH_CLIENT_ID", "")
+    client_secret = os.getenv("GRAPH_CLIENT_SECRET", "")
+
+    token = os.getenv("GRAPH_API_TOKEN", "")
+    if not token and tenant_id and client_id and client_secret:
+        token = _acquire_token_client_credentials(tenant_id, client_id, client_secret)
+
+    return user_id, token
 
 
 # -- Document extensions (for attachment filtering) -------------------------

@@ -52,9 +52,11 @@ def fetch_emails(user_id: str, api_token: str, top: int = 1) -> list[EmailMessag
     logger.info("Node 1: Fetching latest email(s) from Graph API for user %s …", user_id)
 
     url = f"{GRAPH_API_BASE_URL}/v1.0/users/{user_id}/messages"
-    headers = {"Accept": "application/json"}
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {api_token}",
+    }
     params = {
-        "api_token": api_token,
         "$top": top,
         "$orderby": "receivedDateTime desc",
         "$select": "id,subject,from,toRecipients,receivedDateTime,bodyPreview,"
@@ -118,14 +120,16 @@ def enrich_emails(emails: list[EmailMessage], user_id: str, api_token: str) -> l
         logger.error("httpx not installed — cannot enrich emails")
         return emails
 
-    headers = {"Accept": "application/json"}
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {api_token}",
+    }
     base = f"{GRAPH_API_BASE_URL}/v1.0/users/{user_id}/messages"
 
     with httpx.Client(timeout=30.0) as client:
         for email in emails:
             try:
                 params = {
-                    "api_token": api_token,
                     "$select": "id,subject,body,from,toRecipients",
                 }
                 resp = client.get(
@@ -145,7 +149,6 @@ def enrich_emails(emails: list[EmailMessage], user_id: str, api_token: str) -> l
                     resp = client.get(
                         f"{base}/{email.message_id}/attachments",
                         headers=headers,
-                        params={"api_token": api_token},
                     )
                     resp.raise_for_status()
                     att_data = resp.json()

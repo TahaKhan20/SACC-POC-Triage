@@ -61,6 +61,10 @@ SAP_DOC_AI_CREDENTIALS_FILE = os.getenv(
     "SAP_DOC_AI_CREDENTIALS_FILE", str(CONFIG_DIR / "sap_credentials.json")
 )
 
+# Optional: specify a DOX schema ID directly to bypass the schema lookup API
+# (useful when /api/v1/document/schemas is unavailable or returns 404)
+SAP_DOX_SCHEMA_ID = os.getenv("SAP_DOX_SCHEMA_ID", "")
+
 # ── Optional: LLM configuration ─────────────────────────────────────────────
 
 LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "gpt-4")

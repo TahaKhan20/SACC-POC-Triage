@@ -41,7 +41,7 @@ import os
 import time
 from typing import Any, Optional
 
-from .config import SAP_DOC_AI_CREDENTIALS_FILE
+from .config import SAP_DOC_AI_CREDENTIALS_FILE, SAP_DOX_SCHEMA_ID
 from .runner import run_triage
 
 logger = logging.getLogger("triage_doc_ai")
@@ -192,21 +192,53 @@ class DocAIClient:
     # -- Schema discovery -----------------------------------------------
 
     def find_schema(self, name: str = "invoice") -> Optional[str]:
-        """Find a DOX extraction schema by name. Returns the schema_id or None."""
+        """Find a DOX extraction schema by name. Returns the schema_id or None.
+
+        Tries multiple known SAP Document AI API paths, since the exact
+        endpoint varies by service plan and API version.
+        """
         import requests
 
-        resp = requests.get(
-            f"{self.dox_url}/api/v1/document/schemas",
-            headers=self._headers(),
-            timeout=30,
-        )
-        resp.raise_for_status()
-        schemas = resp.json().get("schemas", [])
+        candidate_paths = [
+            "/api/v1/document/schemas",
+            "/api/v1/schemas",
+        ]
+
+        schemas: list[dict[str, Any]] = []
+        last_error: Optional[Exception] = None
+
+        for path in candidate_paths:
+            url = f"{self.dox_url}{path}"
+            try:
+                resp = requests.get(url, headers=self._headers(), timeout=30)
+                if resp.status_code == 404:
+                    logger.debug("Schema endpoint %s returned 404, trying next", url)
+                    continue
+                resp.raise_for_status()
+                schemas = resp.json().get("schemas", [])
+                logger.info("Schema lookup succeeded at %s (%d schemas)", url, len(schemas))
+                break
+            except Exception as exc:
+                last_error = exc
+                logger.debug("Schema endpoint %s failed: %s", url, exc)
+                continue
+
+        if not schemas and last_error:
+            logger.error(
+                "Could not retrieve schemas from SAP Document AI.\n"
+                "  Tried: %s\n"
+                "  Last error: %s\n"
+                "  Set SAP_DOX_SCHEMA_ID env var to bypass schema lookup.",
+                ", ".join(candidate_paths),
+                last_error,
+            )
+            return None
+
         for s in schemas:
             if name.lower() in s.get("name", "").lower():
                 logger.info("Found schema: %s (id=%s)", s.get("name"), s.get("id"))
                 return s.get("id")
-        logger.warning("Schema '%s' not found", name)
+        logger.warning("Schema '%s' not found among %d schemas", name, len(schemas))
         return None
 
     # -- Upload + poll --------------------------------------------------
@@ -232,9 +264,16 @@ class DocAIClient:
             raise FileNotFoundError(f"Document file not found: {file_path}")
 
         if not schema_id:
+            # Check env var first, then auto-discover via API
+            schema_id = SAP_DOX_SCHEMA_ID or None
+        if not schema_id:
             schema_id = self.find_schema("invoice")
             if not schema_id:
-                raise RuntimeError("No invoice schema found in SAP Document AI")
+                raise RuntimeError(
+                    "No invoice schema found in SAP Document AI.\n"
+                    "  The schema lookup API may be unavailable (404).\n"
+                    "  Set SAP_DOX_SCHEMA_ID env var with your schema ID to bypass."
+                )
 
         file_name = os.path.basename(file_path)
         with open(file_path, "rb") as fh:
