@@ -41,6 +41,12 @@ def triage_documents(
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """For each email with document attachments, call the Triage Agent.
 
+    Processes each document attachment through SAP Document AI (DOX) for
+    full extraction (classification + header fields + line items), then
+    runs the triage pipeline.  Falls back to SAP AI Core (classification
+    only) if DOX is unavailable, and to email metadata only if both are
+    unavailable.
+
     Returns (triage_results, errors).
     """
     if dry_run:
@@ -78,21 +84,56 @@ def triage_documents(
                 continue
 
             try:
-                # Call the standalone Triage Agent entry point
-                # The triage agent expects extraction data, not raw files.
-                # We build a payload from the email context and attachment info.
-                payload = {
-                    "headerFields": {
-                        "attachment": att_name,
-                    },
-                    "lineItems": [],
-                }
+                result = None
 
-                # Try to use headerFields from email body if available
-                if email.body_content:
-                    payload["headerFields"]["email_body"] = email.body_content[:500]
+                # ── Primary: SAP Document AI (DOX) — full extraction ──
+                try:
+                    from triage.doc_ai import DocAIClient
+                    logger.info("  Extracting via SAP Document AI …")
+                    dox_client = DocAIClient()
+                    extraction = dox_client.upload_and_process(file_path=temp_path)
+                    converted = DocAIClient.convert_results(extraction)
+                    result = run_triage(
+                        classification_extraction=converted["classification_extraction"],
+                        detailed_extraction=converted["detailed_extraction"],
+                        line_items=converted["line_items"] or None,
+                        file_name=att_name,
+                    )
+                    result["sap_doc_ai"] = {
+                        "job_id": extraction.get("id", ""),
+                        "status": extraction.get("status", ""),
+                    }
+                    logger.info("  DOX extraction succeeded: %d entities, %d line items",
+                                len(converted.get("classification_extraction", [])),
+                                len(converted.get("line_items", [])))
+                except Exception as exc:
+                    logger.warning("  DOX extraction failed: %s — trying AI Core …", exc)
 
-                result = run_triage_from_payload(payload)
+                # ── Fallback 1: SAP AI Core — classification only ──
+                if result is None:
+                    try:
+                        from triage.ai_core import run_triage_with_ai_core
+                        logger.info("  Classifying via SAP AI Core …")
+                        result = run_triage_with_ai_core(
+                            file_path=temp_path,
+                        )
+                        logger.info("  AI Core classification succeeded: type=%s",
+                                    result.get("document_type"))
+                    except Exception as exc:
+                        logger.warning("  AI Core classification failed: %s — using email metadata", exc)
+
+                # ── Fallback 2: email metadata only (last resort) ──
+                if result is None:
+                    logger.info("  Falling back to email metadata only (no document extraction)")
+                    payload = {
+                        "headerFields": {
+                            "attachment": att_name,
+                        },
+                        "lineItems": [],
+                    }
+                    if email.body_content:
+                        payload["headerFields"]["email_body"] = email.body_content[:500]
+                    result = run_triage_from_payload(payload)
 
                 # Enrich result with email context
                 result["email_context"] = {

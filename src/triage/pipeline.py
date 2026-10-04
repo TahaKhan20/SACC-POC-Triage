@@ -8,7 +8,7 @@ deployable without the SACC mock API server.
 Workflow (when called sequentially via runner.run_triage):
     1.  Document type determination (keyword matching on extraction data)
     2.  Company classification (Saudia Cargo vs Saudia Airline vs no-match)
-    3.  Invoice type classification (FUEL / CARGO / CHARTER / SERVICE / OTHER)
+    3.  Invoice type classification (FUEL / CARGO / CARGO / CHARTER / SERVICE / OTHER)
     4.  Detailed field extraction (from pre-supplied extraction entities)
     5.  Validation (required fields, confidence thresholds, line items)
     6.  TriageResult construction
@@ -279,13 +279,17 @@ def classify_company(state: TriageState) -> TriageState:
     match_reasons: list[str] = []
 
     # Check if this is a Saudia Airline invoice (not Saudia Cargo)
+    # Look for the PO number under both snake_case (pipeline format) and
+    # camelCase (SAP DOX raw field name) keys.
     po_number = (
         extracted_values.get("purchase_order_number", "")
         or extracted_values.get("po_number", "")
+        or extracted_values.get("purchaseOrderNumber", "")
     ).strip()
     vendor_number = (
         extracted_values.get("vendor_number", "")
         or extracted_values.get("supplier_number", "")
+        or extracted_values.get("vendorNumber", "")
     ).strip()
 
     if po_number.startswith("62") and vendor_number.startswith("15"):
@@ -298,6 +302,20 @@ def classify_company(state: TriageState) -> TriageState:
         logger.info("Company classification: %s (Saudia Airline)", company_classification.value)
         return {**state, "company_classification": company_classification.value,
                 "company_name": "Saudia Airline", "evidence": evidence}
+
+    # If a PO number was extracted and it does NOT start with 62,
+    # classify as Saudia Cargo (MATCH) immediately.
+    if po_number and not po_number.startswith("62"):
+        company_classification = CompanyClassification.MATCH
+        match_reasons.append(
+            f"PO '{po_number}' does not start with 62 — classified as Saudia Cargo"
+        )
+        evidence.append(
+            f"Company classification: {company_classification.value}. " + "; ".join(match_reasons)
+        )
+        logger.info("Company classification: %s (Saudia Cargo — PO not 62)", company_classification.value)
+        return {**state, "company_classification": company_classification.value,
+                "company_name": "Saudia Cargo", "evidence": evidence}
 
     if extracted_company_code:
         if extracted_company_code == CONFIGURED_COMPANY_CODE:
