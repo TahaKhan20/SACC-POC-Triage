@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Optional
 
 # ── Paths ──────────────────────────────────────────────────────────────────
 
@@ -48,13 +47,12 @@ MIN_REQUIRED_FIELD_CONFIDENCE = float(
     os.getenv("MIN_REQUIRED_FIELD_CONFIDENCE", "0.80")
 )
 
-# ── Optional: SAP Document AI real API credentials ─────────────────────────
+# ── SAP Document AI credentials ───────────────────────────────────────────
 
-SAP_DOCAI_BASE_URL = os.getenv("SAP_DOCAI_BASE_URL", "")
-SAP_DOCAI_CLIENT_ID = os.getenv("SAP_DOCAI_CLIENT_ID", "")
-SAP_DOCAI_CLIENT_SECRET = os.getenv("SAP_DOCAI_CLIENT_SECRET", "")
-SAP_DOCAI_UAA_URL = os.getenv("SAP_DOCAI_UAA_URL", "")
-SAP_DOCAI_TOKEN: Optional[str] = None
+# Path to the SAP service-key JSON file (default: config/sap_credentials.json)
+SAP_CREDENTIALS_FILE = os.getenv(
+    "SAP_CREDENTIALS_FILE", str(CONFIG_DIR / "sap_credentials.json")
+)
 
 # ── Optional: LLM configuration ─────────────────────────────────────────────
 

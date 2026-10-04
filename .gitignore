@@ -10,3 +10,4 @@ build/
 output/
 invoice_samples/*
 !invoice_samples/.gitkeep
+config/sap_credentials.json

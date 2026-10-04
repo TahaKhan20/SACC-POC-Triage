@@ -2,7 +2,7 @@
 
 Provides a real SAP Document AI integration layer for the triage pipeline.
 This module handles:
-    1.  OAuth2 client-credentials authentication (from cred.json or env vars)
+    1.  OAuth2 client-credentials authentication (from config/sap_credentials.json)
     2.  Document upload + job submission
     3.  Polling for job completion
     4.  Converting SAP extraction results to the pipeline's DocumentEntity format
@@ -10,10 +10,10 @@ This module handles:
         gets results, and runs the full triage pipeline
 
 Authentication:
-    Credentials can be provided via:
-        a) A ``cred.json`` file (SAP service key) — set ``SAP_DOCAI_CRED_FILE``
-        b) Individual env vars: ``SAP_DOCAI_UAA_URL``, ``SAP_DOCAI_CLIENT_ID``,
-           ``SAP_DOCAI_CLIENT_SECRET``, ``SAP_DOCAI_BASE_URL``
+    Credentials are loaded from a SAP service-key JSON file.
+    Default location: ``config/sap_credentials.json``
+    Override with ``--cred-file`` CLI arg or ``SAP_CREDENTIALS_FILE`` env var.
+    See ``config/sap_credentials.json.example`` for the template.
 
 Dependencies:
     ``requests`` (pip install requests)
@@ -28,7 +28,7 @@ Usage (programmatic)::
 Usage (CLI)::
 
     python run_doc_ai.py path/to/invoice.pdf
-    python run_doc_ai.py path/to/invoice.pdf --cred-file cred.json
+    python run_doc_ai.py path/to/invoice.pdf --cred-file /custom/cred.json
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from .config import SAP_DOCAI_UAA_URL, SAP_DOCAI_BASE_URL, SAP_DOCAI_CLIENT_ID, SAP_DOCAI_CLIENT_SECRET
+from .config import SAP_CREDENTIALS_FILE
 from .runner import run_triage
 
 logger = logging.getLogger("triage_doc_ai")
@@ -73,38 +73,21 @@ def _load_cred_file(cred_file: str) -> dict[str, str]:
 def _resolve_credentials(
     cred_file: Optional[str] = None,
 ) -> dict[str, str]:
-    """Resolve Doc AI credentials from cred file or env vars.
+    """Resolve Doc AI credentials from a JSON file.
 
-    Priority: explicit cred_file arg > SAP_DOCAI_CRED_FILE env var > individual env vars.
+    Priority: explicit cred_file arg > SAP_CREDENTIALS_FILE env var >
+              config/sap_credentials.json (default).
     """
-    cred_file = cred_file or os.getenv("SAP_DOCAI_CRED_FILE", "")
+    cred_file = cred_file or SAP_CREDENTIALS_FILE
     if cred_file and os.path.isfile(cred_file):
-        logger.info("Loading credentials from %s", cred_file)
+        logger.info("Loading SAP credentials from %s", cred_file)
         return _load_cred_file(cred_file)
 
-    # Fall back to individual env vars (from config.py defaults)
-    uaa_url = os.getenv("SAP_DOCAI_UAA_URL", SAP_DOCAI_UAA_URL or "")
-    client_id = os.getenv("SAP_DOCAI_CLIENT_ID", SAP_DOCAI_CLIENT_ID or "")
-    client_secret = os.getenv("SAP_DOCAI_CLIENT_SECRET", SAP_DOCAI_CLIENT_SECRET or "")
-    dox_url = os.getenv("SAP_DOCAI_BASE_URL", SAP_DOCAI_BASE_URL or "")
-
-    if not all([uaa_url, client_id, client_secret, dox_url]):
-        raise ValueError(
-            "SAP Document AI credentials not found. Provide either:
-"
-            "  1. A cred.json file path via --cred-file or SAP_DOCAI_CRED_FILE env var, or
-"
-            "  2. Individual env vars: SAP_DOCAI_UAA_URL, SAP_DOCAI_CLIENT_ID,
-"
-            "     SAP_DOCAI_CLIENT_SECRET, SAP_DOCAI_BASE_URL"
-        )
-
-    return {
-        "uaa_url": uaa_url,
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "dox_url": dox_url,
-    }
+    raise ValueError(
+        f"SAP Document AI credentials not found.\n"
+        f"Expected a credentials file at: {cred_file}\n"
+        f"Create it from config/sap_credentials.json.example or pass --cred-file <path>"
+    )
 
 
 # ── Doc AI Client ──────────────────────────────────────────────────────────
@@ -114,8 +97,8 @@ class DocAIClient:
     """Client for the SAP Document Information Extraction API.
 
     Args:
-        cred_file: Path to a SAP service-key JSON file. If not provided,
-            credentials are resolved from environment variables.
+        cred_file: Path to a SAP service-key JSON file. Defaults to
+            ``config/sap_credentials.json`` (see ``SAP_CREDENTIALS_FILE`` env var).
         client_id_param: The SAP clientId query parameter (default: "default").
     """
 
@@ -420,7 +403,7 @@ def run_triage_with_doc_ai(
 
     Args:
         file_path: Path to the document file (PDF, PNG, JPG, etc.).
-        cred_file: Path to SAP service-key JSON file. If not provided, resolved from env vars.
+        cred_file: Path to SAP service-key JSON file. Defaults to config/sap_credentials.json.
         document_type: Document type for extraction (default: "invoice").
         schema_id: Optional schema ID. Auto-finds invoice schema if not provided.
         enrichment: Optional enrichment settings dict.
