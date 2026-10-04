@@ -192,53 +192,26 @@ class DocAIClient:
     # -- Schema discovery -----------------------------------------------
 
     def find_schema(self, name: str = "invoice") -> Optional[str]:
-        """Find a DOX extraction schema by name. Returns the schema_id or None.
-
-        Tries multiple known SAP Document AI API paths, since the exact
-        endpoint varies by service plan and API version.
-        """
+        """Find a DOX extraction schema by document type. Returns the schema_id or None."""
         import requests
 
-        candidate_paths = [
-            "/api/v1/document/schemas",
-            "/api/v1/schemas",
-        ]
+        resp = requests.get(
+            f"{self.dox_url}/schemas",
+            headers=self._headers(),
+            params={"clientId": "default"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        schemas = data.get("schemas", data.get("payload", []))
 
-        schemas: list[dict[str, Any]] = []
-        last_error: Optional[Exception] = None
+        matching = [x for x in schemas if x.get("documentType") == name]
+        if matching:
+            schema = matching[0]
+            logger.info("Found schema: %s (id=%s)", schema.get("name"), schema.get("id"))
+            return schema.get("id")
 
-        for path in candidate_paths:
-            url = f"{self.dox_url}{path}"
-            try:
-                resp = requests.get(url, headers=self._headers(), timeout=30)
-                if resp.status_code == 404:
-                    logger.debug("Schema endpoint %s returned 404, trying next", url)
-                    continue
-                resp.raise_for_status()
-                schemas = resp.json().get("schemas", [])
-                logger.info("Schema lookup succeeded at %s (%d schemas)", url, len(schemas))
-                break
-            except Exception as exc:
-                last_error = exc
-                logger.debug("Schema endpoint %s failed: %s", url, exc)
-                continue
-
-        if not schemas and last_error:
-            logger.error(
-                "Could not retrieve schemas from SAP Document AI.\n"
-                "  Tried: %s\n"
-                "  Last error: %s\n"
-                "  Set SAP_DOX_SCHEMA_ID env var to bypass schema lookup.",
-                ", ".join(candidate_paths),
-                last_error,
-            )
-            return None
-
-        for s in schemas:
-            if name.lower() in s.get("name", "").lower():
-                logger.info("Found schema: %s (id=%s)", s.get("name"), s.get("id"))
-                return s.get("id")
-        logger.warning("Schema '%s' not found among %d schemas", name, len(schemas))
+        logger.warning("Schema with documentType='%s' not found among %d schemas", name, len(schemas))
         return None
 
     # -- Upload + poll --------------------------------------------------
