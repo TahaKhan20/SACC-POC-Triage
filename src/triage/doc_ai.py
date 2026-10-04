@@ -40,7 +40,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from .config import SAP_DOCAI_AUTH_URL, SAP_DOCAI_BASE_URL, SAP_DOCAI_CLIENT_ID, SAP_DOCAI_CLIENT_SECRET
+from .config import SAP_DOCAI_UAA_URL, SAP_DOCAI_BASE_URL, SAP_DOCAI_CLIENT_ID, SAP_DOCAI_CLIENT_SECRET
 from .runner import run_triage
 
 logger = logging.getLogger("triage_doc_ai")
@@ -83,10 +83,10 @@ def _resolve_credentials(
         return _load_cred_file(cred_file)
 
     # Fall back to individual env vars (from config.py defaults)
-    uaa_url = os.getenv("SAP_DOCAI_UAA_URL", SAP_DOCAI_AUTH_URL or "")
-    client_id = os.getenv("SAP_DOCAI_CLIENT_ID_ENV", SAP_DOCAI_CLIENT_ID or "")
-    client_secret = os.getenv("SAP_DOCAI_CLIENT_SECRET_ENV", SAP_DOCAI_CLIENT_SECRET or "")
-    dox_url = os.getenv("SAP_DOCAI_BASE_URL_ENV", SAP_DOCAI_BASE_URL or "")
+    uaa_url = os.getenv("SAP_DOCAI_UAA_URL", SAP_DOCAI_UAA_URL or "")
+    client_id = os.getenv("SAP_DOCAI_CLIENT_ID", SAP_DOCAI_CLIENT_ID or "")
+    client_secret = os.getenv("SAP_DOCAI_CLIENT_SECRET", SAP_DOCAI_CLIENT_SECRET or "")
+    dox_url = os.getenv("SAP_DOCAI_BASE_URL", SAP_DOCAI_BASE_URL or "")
 
     if not all([uaa_url, client_id, client_secret, dox_url]):
         raise ValueError(
@@ -94,9 +94,9 @@ def _resolve_credentials(
 "
             "  1. A cred.json file path via --cred-file or SAP_DOCAI_CRED_FILE env var, or
 "
-            "  2. Individual env vars: SAP_DOCAI_UAA_URL, SAP_DOCAI_CLIENT_ID_ENV,
+            "  2. Individual env vars: SAP_DOCAI_UAA_URL, SAP_DOCAI_CLIENT_ID,
 "
-            "     SAP_DOCAI_CLIENT_SECRET_ENV, SAP_DOCAI_BASE_URL_ENV"
+            "     SAP_DOCAI_CLIENT_SECRET, SAP_DOCAI_BASE_URL"
         )
 
     return {

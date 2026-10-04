@@ -53,7 +53,7 @@ MIN_REQUIRED_FIELD_CONFIDENCE = float(
 SAP_DOCAI_BASE_URL = os.getenv("SAP_DOCAI_BASE_URL", "")
 SAP_DOCAI_CLIENT_ID = os.getenv("SAP_DOCAI_CLIENT_ID", "")
 SAP_DOCAI_CLIENT_SECRET = os.getenv("SAP_DOCAI_CLIENT_SECRET", "")
-SAP_DOCAI_AUTH_URL = os.getenv("SAP_DOCAI_AUTH_URL", "")
+SAP_DOCAI_UAA_URL = os.getenv("SAP_DOCAI_UAA_URL", "")
 SAP_DOCAI_TOKEN: Optional[str] = None
 
 # ── Optional: LLM configuration ─────────────────────────────────────────────
