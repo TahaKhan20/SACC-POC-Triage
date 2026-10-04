@@ -291,7 +291,11 @@ class DocAIClient:
         # Build invoice_source lookup from extracted values
         values: dict[str, str] = {}
         for e in entities:
-            val = e.get("stringValue") or str(e.get("numberValue", "") or "") or ""
+            val = e.get("stringValue")
+            if val is None:
+                num = e.get("numberValue")
+                if num is not None:
+                    val = str(num)
             if val:
                 values[e["name"]] = str(val)
 
@@ -305,7 +309,7 @@ class DocAIClient:
             "total_amount": ["total_amount", "grossAmount"],
             "currency": ["currency", "currencyCode"],
             "net_amount": ["net_amount", "netAmount"],
-            "tax_amount": ["tax_amount"],
+            "tax_amount": ["tax_amount", "taxAmount"],
             "po_number": ["po_number", "purchaseOrderNumber"],
             "payment_terms": ["payment_terms", "paymentTerms"],
             "keywords": ["keywords"],
@@ -363,19 +367,47 @@ def _convert_sap_header_fields(
     return entities
 
 
-def _convert_sap_line_item(item: dict[str, Any]) -> dict[str, Any]:
-    """Convert a SAP Doc AI line item to the pipeline's line-item dict format."""
+def _convert_sap_line_item(item: dict[str, Any] | list[dict[str, Any]]) -> dict[str, Any]:
+    """Convert a SAP Doc AI line item to the pipeline's line-item dict format.
+
+    SAP Doc AI returns each line item as a **list of field dicts**::
+
+        [{"name": "itemNumber", "value": "001", "confidence": 0.9},
+         {"name": "description", "value": "Air Freight", "confidence": 0.85}, ...]
+
+    This function flattens that list into a dict keyed by field name before
+    extracting values. Also handles the flat-dict format for backward compat.
+    """
+    raw = item
+
+    # If item is a list of field dicts, flatten into a dict keyed by field name
+    if isinstance(item, list):
+        fields: dict[str, Any] = {}
+        confidences: list[float] = []
+        for f in item:
+            if not isinstance(f, dict):
+                continue
+            name = f.get("name", "")
+            if name:
+                fields[name] = f.get("value")
+                conf = float(f.get("confidence") or 0)
+                if conf > 0:
+                    confidences.append(conf)
+        item = fields
+        # Use average confidence across all fields in the row
+        item["confidence"] = sum(confidences) / len(confidences) if confidences else 0.0
+
     result: dict[str, Any] = {
-        "item_number": str(item.get("itemNumber", item.get("rowNumber", ""))),
-        "description": str(item.get("description", item.get("itemDescription", ""))),
+        "item_number": str(item.get("itemNumber") or item.get("rowNumber") or ""),
+        "description": str(item.get("description") or item.get("itemDescription") or ""),
         "quantity": item.get("quantity"),
         "unit_price": item.get("unitPrice"),
-        "total_amount": item.get("totalAmount", item.get("amount")),
-        "gl_account": str(item.get("glAccount", "")),
-        "cost_center": str(item.get("costCenter", "")),
-        "tax_code": str(item.get("taxCode", "")),
+        "total_amount": item.get("totalAmount") or item.get("amount"),
+        "gl_account": str(item.get("glAccount") or ""),
+        "cost_center": str(item.get("costCenter") or ""),
+        "tax_code": str(item.get("taxCode") or ""),
         "confidence": float(item.get("confidence") or 0),
-        "raw_data": item,
+        "raw_data": raw,
     }
     return result
 
